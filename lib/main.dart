@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:lifevault/presentation/views/record_list_screen.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const LifeVaultApp());
 }
 
@@ -16,9 +18,7 @@ class LifeVaultApp extends StatelessWidget {
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueGrey),
       ),
-      home: const Scaffold(
-        body: Center(child: Text('LifeVault', style: TextStyle(fontSize: 24))),
-      ),
+      home: const RecordListScreen(),
     );
   }
 }

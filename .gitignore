@@ -43,3 +43,14 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Windows
+windows/flutter/ephemeral/
+windows/flutter/ephemeral/generated_config.cmake
+
+# Linux
+linux/flutter/ephemeral/
+
+# macOS
+macos/Flutter/ephemeral/
+
