@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:lifevault/presentation/viewmodels/record_list_viewmodel.dart';
-import 'package:lifevault/presentation/views/add_edit_record_screen.dart';
-import 'package:lifevault/presentation/widgets/expiry_badge.dart';
+import 'package:lifevault/presentation/views/add_edit_record_screen.dart'; // Keep this if used, otherwise remove? ExpiryBadge is used in RecordCard, not here? Wait, RecordListScreen doesn't use ExpiryBadge directly anymore, RecordCard does.
+// But check imports.
+import 'package:lifevault/data/models/record_model.dart';
+import 'package:lifevault/core/enums/expiry_status.dart';
+import 'package:lifevault/presentation/widgets/record_card.dart';
+import 'package:lifevault/presentation/widgets/section_header.dart';
+import 'package:lifevault/presentation/widgets/empty_state_widget.dart';
+import 'package:lifevault/presentation/widgets/dashboard_summary.dart';
+import 'package:lifevault/presentation/views/record_detail_screen.dart';
 
 /// Displays all non-archived records with expiry status badges.
 class RecordListScreen extends StatefulWidget {
@@ -35,21 +41,18 @@ class _RecordListScreenState extends State<RecordListScreen> {
     if (didSave == true) _viewModel.loadRecords();
   }
 
-  Future<void> _navigateToEdit(int index) async {
-    final record = _viewModel.records[index];
-    final didSave = await Navigator.push<bool>(
+  Future<void> _navigateToDetail(RecordModel record) async {
+    final didChange = await Navigator.push<bool>(
       context,
-      MaterialPageRoute(
-        builder: (_) => AddEditRecordScreen(existingRecord: record),
-      ),
+      MaterialPageRoute(builder: (_) => RecordDetailScreen(record: record)),
     );
-    if (didSave == true) _viewModel.loadRecords();
+    if (didChange == true) _viewModel.loadRecords();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('My Records')),
+      appBar: AppBar(title: const Text('MY VAULT')),
       floatingActionButton: FloatingActionButton(
         onPressed: _navigateToAdd,
         child: const Icon(Icons.add),
@@ -66,7 +69,11 @@ class _RecordListScreenState extends State<RecordListScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                  Icon(
+                    Icons.error_outline,
+                    size: 48,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
                   const SizedBox(height: 12),
                   Text(_viewModel.errorMessage!),
                   const SizedBox(height: 12),
@@ -80,120 +87,147 @@ class _RecordListScreenState extends State<RecordListScreen> {
           }
 
           if (_viewModel.records.isEmpty) {
-            return const Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.folder_open, size: 64, color: Colors.grey),
-                  SizedBox(height: 12),
-                  Text(
-                    'No records yet.\nTap + to add your first document.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                ],
-              ),
+            return EmptyStateWidget(
+              message: 'No records yet.\nTap + to add your first document.',
+              icon: Icons.folder_open,
+              onAction: _navigateToAdd,
+              actionLabel: 'Add Record',
             );
           }
 
+          // Group records by status
+          final expired = _viewModel.records
+              .where((r) => r.expiryStatus == ExpiryStatus.expired)
+              .toList();
+          final expiringSoon = _viewModel.records
+              .where((r) => r.expiryStatus == ExpiryStatus.expiringSoon)
+              .toList();
+          final valid = _viewModel.records
+              .where((r) => r.expiryStatus == ExpiryStatus.valid)
+              .toList();
+          final noExpiry = _viewModel.records
+              .where((r) => r.expiryStatus == ExpiryStatus.noExpiry)
+              .toList();
+
+          // Sort within groups
+          // Sort within groups
+          int compareDates(RecordModel a, RecordModel b) {
+            if (a.expiryAt == null) return 1;
+            if (b.expiryAt == null) return -1;
+            return a.expiryAt!.compareTo(b.expiryAt!);
+          }
+
+          expired.sort(compareDates);
+          expiringSoon.sort(compareDates);
+          valid.sort(compareDates);
+          noExpiry.sort((a, b) => a.title.compareTo(b.title));
+
           return RefreshIndicator(
             onRefresh: _viewModel.loadRecords,
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: _viewModel.records.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                final record = _viewModel.records[index];
-                return _RecordTile(
-                  record: record,
-                  onTap: () => _navigateToEdit(index),
-                  onDismissed: () => _viewModel.archiveRecord(record),
-                );
-              },
+            child: CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: DashboardSummary(records: _viewModel.records),
+                ),
+                if (expired.isNotEmpty) ...[
+                  const SliverToBoxAdapter(
+                    child: SectionHeader(title: 'Expired'),
+                  ),
+                  SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) =>
+                          _buildRecordItem(expired[index], context),
+                      childCount: expired.length,
+                    ),
+                  ),
+                ],
+                if (expiringSoon.isNotEmpty) ...[
+                  const SliverToBoxAdapter(
+                    child: SectionHeader(title: 'Expiring Soon'),
+                  ),
+                  SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) =>
+                          _buildRecordItem(expiringSoon[index], context),
+                      childCount: expiringSoon.length,
+                    ),
+                  ),
+                ],
+                if (valid.isNotEmpty) ...[
+                  const SliverToBoxAdapter(
+                    child: SectionHeader(title: 'Valid'),
+                  ),
+                  SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) =>
+                          _buildRecordItem(valid[index], context),
+                      childCount: valid.length,
+                    ),
+                  ),
+                ],
+                if (noExpiry.isNotEmpty) ...[
+                  const SliverToBoxAdapter(
+                    child: SectionHeader(title: 'No Expiry'),
+                  ),
+                  SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) =>
+                          _buildRecordItem(noExpiry[index], context),
+                      childCount: noExpiry.length,
+                    ),
+                  ),
+                ],
+                const SliverPadding(padding: EdgeInsets.only(bottom: 80)),
+              ],
             ),
           );
         },
       ),
     );
   }
-}
 
-// -----------------------------------------------------------------------------
-// Private tile widget
-// -----------------------------------------------------------------------------
-
-class _RecordTile extends StatelessWidget {
-  final dynamic record; // RecordModel
-  final VoidCallback onTap;
-  final VoidCallback onDismissed;
-
-  const _RecordTile({
-    required this.record,
-    required this.onTap,
-    required this.onDismissed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final dateFormat = DateFormat('dd MMM yyyy');
-    final expiryText = record.expiryAt != null
-        ? dateFormat.format(record.expiryAt!)
-        : '—';
-
-    return Dismissible(
-      key: ValueKey(record.id),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        color: Colors.orange.shade100,
-        child: Icon(Icons.archive, color: Colors.orange.shade700),
-      ),
-      confirmDismiss: (_) async {
-        return await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Archive Record'),
-            content: const Text('Move this record to archive?'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Archive'),
-              ),
-            ],
+  Widget _buildRecordItem(RecordModel record, BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Dismissible(
+        key: ValueKey(record.id),
+        direction: DismissDirection.endToStart,
+        background: Container(
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.only(right: 20),
+          decoration: BoxDecoration(
+            color: Colors.orange.shade100,
+            borderRadius: BorderRadius.circular(12),
           ),
-        );
-      },
-      onDismissed: (_) => onDismissed(),
-      child: ListTile(
-        onTap: onTap,
-        leading: _categoryIcon(record.category),
-        title: Text(record.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text('Expires: $expiryText'),
-        trailing: ExpiryBadge(status: record.expiryStatus),
+          child: Icon(Icons.archive, color: Colors.orange.shade700),
+        ),
+        confirmDismiss: (_) async {
+          return await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Archive Record'),
+              content: const Text('Move this record to archive?'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Archive'),
+                ),
+              ],
+            ),
+          );
+        },
+        onDismissed: (_) => _viewModel.archiveRecord(record),
+        child: RecordCard(
+          record: record,
+          onTap: () {
+            _navigateToDetail(record);
+          },
+        ),
       ),
-    );
-  }
-
-  Widget _categoryIcon(String category) {
-    final (IconData icon, Color color) = switch (category) {
-      'ID & Personal' => (Icons.person, Colors.blue),
-      'Financial' => (Icons.account_balance, Colors.green),
-      'Medical' => (Icons.local_hospital, Colors.red),
-      'Insurance' => (Icons.shield, Colors.purple),
-      'Education' => (Icons.school, Colors.orange),
-      'Travel' => (Icons.flight, Colors.teal),
-      'Legal' => (Icons.gavel, Colors.brown),
-      _ => (Icons.description, Colors.grey),
-    };
-
-    return CircleAvatar(
-      backgroundColor: color.withValues(alpha: 0.12),
-      child: Icon(icon, color: color, size: 20),
     );
   }
 }
