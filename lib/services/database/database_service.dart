@@ -22,14 +22,34 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
       onConfigure: _onConfigure,
     );
   }
 
+  /// Fresh install — create both tables at the current schema version.
   Future<void> _onCreate(Database db, int version) async {
     await db.execute(DatabaseSchema.createRecordsTable);
+    await db.execute(DatabaseSchema.createDocumentVersionsTable);
+    await db.execute(DatabaseSchema.createVersionRecordIndex);
+  }
+
+  /// Migrate from v1 → v2:
+  /// 1. Create `document_versions` table
+  /// 2. Copy expiry_at + notes from records into version rows
+  /// 3. Rebuild records table without expiry_at / notes columns
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute(DatabaseSchema.createDocumentVersionsTable);
+      await db.execute(DatabaseSchema.createVersionRecordIndex);
+      await db.execute(DatabaseSchema.migrateExpiryToVersions);
+      await db.execute(DatabaseSchema.createRecordsTableTemp);
+      await db.execute(DatabaseSchema.copyRecordsToNew);
+      await db.execute(DatabaseSchema.dropOldRecordsTable);
+      await db.execute(DatabaseSchema.renameNewRecordsTable);
+    }
   }
 
   Future<void> _onConfigure(Database db) async {

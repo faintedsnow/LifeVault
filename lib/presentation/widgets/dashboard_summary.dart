@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:lifevault/core/enums/expiry_status.dart';
 import 'package:lifevault/data/models/record_model.dart';
+import 'package:lifevault/main.dart';
 
+/// Dashboard header: vault status + 3-stat row.
+/// Pure editorial layout — no decorative shapes.
 class DashboardSummary extends StatelessWidget {
   final List<RecordModel> records;
 
@@ -11,91 +16,102 @@ class DashboardSummary extends StatelessWidget {
   Widget build(BuildContext context) {
     if (records.isEmpty) return const SizedBox.shrink();
 
+    final theme = Theme.of(context);
+
     final expiredCount = records
-        .where((r) => r.expiryStatus == ExpiryStatus.expired)
+        .where(
+          (r) =>
+              (r.activeVersion?.expiryStatus ?? ExpiryStatus.noExpiry) ==
+              ExpiryStatus.expired,
+        )
         .length;
     final expiringSoonCount = records
-        .where((r) => r.expiryStatus == ExpiryStatus.expiringSoon)
+        .where(
+          (r) =>
+              (r.activeVersion?.expiryStatus ?? ExpiryStatus.noExpiry) ==
+              ExpiryStatus.expiringSoon,
+        )
         .length;
     final validCount = records
-        .where((r) => r.expiryStatus == ExpiryStatus.valid)
+        .where(
+          (r) =>
+              (r.activeVersion?.expiryStatus ?? ExpiryStatus.noExpiry) ==
+              ExpiryStatus.valid,
+        )
         .length;
 
-    // Editorial Logic: determine the "Headline"
-    String headline = 'VAULT SECURE';
-    Color statusColor = const Color(0xFF2E7D32); // Green
-    String subhead = 'All documents are up to date.';
-
-    if (expiredCount > 0) {
-      headline = 'ACTION REQUIRED';
-      statusColor = Theme.of(context).colorScheme.error;
-      subhead = '$expiredCount document${expiredCount > 1 ? 's' : ''} expired.';
-    } else if (expiringSoonCount > 0) {
-      headline = 'ATTENTION';
-      statusColor = Colors.amber.shade800;
-      subhead =
-          '$expiringSoonCount document${expiringSoonCount > 1 ? 's' : ''} expiring soon.';
-    }
+    final hasUrgent = expiredCount > 0 || expiringSoonCount > 0;
+    final statusLabel = expiredCount > 0
+        ? 'ACTION REQUIRED'
+        : expiringSoonCount > 0
+        ? 'ATTENTION NEEDED'
+        : 'VAULT SECURE';
+    final statusDotColor = expiredCount > 0
+        ? LVColors.expired
+        : expiringSoonCount > 0
+        ? LVColors.expiringSoon
+        : LVColors.valid;
 
     return Container(
-      margin: const EdgeInsets.fromLTRB(20, 20, 20, 8),
-      padding: const EdgeInsets.all(24),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 4),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.primary,
-        borderRadius: BorderRadius.circular(4), // "Graphic block" style
+        color: LVColors.primaryDark,
+        borderRadius: BorderRadius.circular(16),
       ),
+      padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Status pill
           Row(
             children: [
               Container(
-                width: 8,
-                height: 8,
+                width: 7,
+                height: 7,
                 decoration: BoxDecoration(
-                  color: statusColor,
+                  color: statusDotColor,
                   shape: BoxShape.circle,
                 ),
               ),
               const SizedBox(width: 8),
               Text(
-                'STATUS UPDATE',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.7),
+                statusLabel,
+                style: const TextStyle(
+                  color: Color(0xFFB7F5DB),
                   fontSize: 10,
-                  letterSpacing: 1.5,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.8,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
+
+          // Main messaging
           Text(
-            headline,
-            style: const TextStyle(
+            hasUrgent
+                ? expiredCount > 0
+                      ? '$expiredCount document${expiredCount > 1 ? 's' : ''} expired'
+                      : '$expiringSoonCount expiring soon'
+                : 'All documents current',
+            style: theme.textTheme.headlineMedium?.copyWith(
               color: Colors.white,
-              fontSize: 24,
-              fontWeight: FontWeight.w900, // Display style
-              letterSpacing: -0.5,
               height: 1.1,
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            subhead,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.8),
-              fontSize: 14,
-              height: 1.5,
-            ),
-          ),
+
           const SizedBox(height: 24),
-          // Mini stats row
+          Container(height: 1, color: Colors.white.withValues(alpha: 0.12)),
+          const SizedBox(height: 20),
+
+          // Three stats
           Row(
             children: [
-              _buildStat(context, 'Total', records.length.toString()),
-              const SizedBox(width: 24),
-              _buildStat(context, 'Valid', validCount.toString()),
+              _buildStat('${records.length}', 'TOTAL'),
+              _buildDivider(),
+              _buildStat('$validCount', 'VALID'),
+              _buildDivider(),
+              _buildStat('$expiredCount', 'EXPIRED'),
             ],
           ),
         ],
@@ -103,28 +119,144 @@ class DashboardSummary extends StatelessWidget {
     );
   }
 
-  Widget _buildStat(BuildContext context, String label, String value) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          value,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
+  Widget _buildStat(String value, String label) {
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.5,
+            ),
           ),
-        ),
-        Text(
-          label.toUpperCase(),
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.5),
-            fontSize: 10,
-            letterSpacing: 1.0,
-            fontWeight: FontWeight.w600,
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFF8AB8A8),
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.4,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
+  }
+
+  Widget _buildDivider() {
+    return Container(
+      width: 1,
+      height: 36,
+      color: Colors.white.withValues(alpha: 0.12),
+      margin: const EdgeInsets.only(right: 20),
+    );
+  }
+}
+
+/// Category grid card displayed inside the dashboard.
+class CategoryCard extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final int count;
+  final int urgentCount;
+  final VoidCallback? onTap;
+
+  const CategoryCard({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.count,
+    this.urgentCount = 0,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hasUrgent = urgentCount > 0;
+
+    return GestureDetector(
+          onTap: () {
+            HapticFeedback.lightImpact();
+            onTap?.call();
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: hasUrgent
+                    ? LVColors.expired.withValues(alpha: 0.25)
+                    : const Color(0xFFD8E0DE),
+                width: 1.2,
+              ),
+            ),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: LVColors.primary.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(icon, size: 18, color: LVColors.primary),
+                    ),
+                    if (hasUrgent)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: LVColors.expiredBg,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          '$urgentCount',
+                          style: const TextStyle(
+                            color: LVColors.expired,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const Spacer(),
+                Text(
+                  label,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '$count item${count != 1 ? 's' : ''}',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        )
+        .animate()
+        .scale(
+          begin: const Offset(1, 1),
+          end: const Offset(0.95, 0.95),
+          duration: 100.ms,
+          curve: Curves.easeOut,
+        )
+        .fadeIn(duration: 400.ms, delay: 100.ms);
   }
 }

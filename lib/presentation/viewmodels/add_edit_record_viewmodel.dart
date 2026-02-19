@@ -1,25 +1,31 @@
 import 'package:flutter/foundation.dart';
 import 'package:lifevault/data/models/record_model.dart';
+import 'package:lifevault/data/models/document_version.dart';
 import 'package:lifevault/data/repositories/record_repository.dart';
+import 'package:lifevault/data/repositories/version_repository.dart';
 import 'package:uuid/uuid.dart';
 
 /// ViewModel that manages the Add / Edit record form.
 ///
-/// Holds mutable form state and exposes a single [save] method that
-/// either inserts a new record or updates an existing one.
+/// On create: inserts a new record AND auto-creates version 1.
+/// On edit: updates the record identity AND its active version.
 class AddEditRecordViewModel extends ChangeNotifier {
-  final RecordRepository _repository;
+  final RecordRepository _recordRepo;
+  final VersionRepository _versionRepo;
   static const _uuid = Uuid();
 
   AddEditRecordViewModel({
-    RecordRepository? repository,
+    RecordRepository? recordRepository,
+    VersionRepository? versionRepository,
     RecordModel? existingRecord,
-  }) : _repository = repository ?? RecordRepository(),
+  }) : _recordRepo = recordRepository ?? RecordRepository(),
+       _versionRepo = versionRepository ?? VersionRepository(),
        _existingRecord = existingRecord,
        _title = existingRecord?.title ?? '',
        _category = existingRecord?.category ?? '',
-       _notes = existingRecord?.notes ?? '',
-       _expiryAt = existingRecord?.expiryAt;
+       _notes = existingRecord?.activeVersion?.notes ?? '',
+       _expiryAt = existingRecord?.activeVersion?.expiryDate,
+       _issueDate = existingRecord?.activeVersion?.issueDate;
 
   // ---------------------------------------------------------------------------
   // State
@@ -55,6 +61,13 @@ class AddEditRecordViewModel extends ChangeNotifier {
   DateTime? get expiryAt => _expiryAt;
   set expiryAt(DateTime? value) {
     _expiryAt = value;
+    notifyListeners();
+  }
+
+  DateTime? _issueDate;
+  DateTime? get issueDate => _issueDate;
+  set issueDate(DateTime? value) {
+    _issueDate = value;
     notifyListeners();
   }
 
@@ -94,7 +107,7 @@ class AddEditRecordViewModel extends ChangeNotifier {
   // Persistence
   // ---------------------------------------------------------------------------
 
-  /// Validates, then inserts or updates the record.
+  /// Validates, then inserts or updates the record + version.
   /// Returns `true` on success so the screen can pop.
   Future<bool> save() async {
     final validationError = validate();
@@ -112,25 +125,49 @@ class AddEditRecordViewModel extends ChangeNotifier {
       final now = DateTime.now();
 
       if (isEditing) {
-        final updated = _existingRecord!.copyWith(
+        final existing = _existingRecord!;
+        // Update record identity
+        final updated = existing.copyWith(
           title: _title.trim(),
           category: _category,
-          notes: _notes.trim().isEmpty ? null : _notes.trim(),
-          expiryAt: _expiryAt,
           updatedAt: now,
         );
-        await _repository.update(updated);
+        await _recordRepo.update(updated);
+
+        // Update the active version
+        final existingVersion = existing.activeVersion;
+        if (existingVersion != null) {
+          final updatedVersion = existingVersion.copyWith(
+            expiryDate: _expiryAt,
+            issueDate: _issueDate,
+            notes: _notes.trim().isEmpty ? null : _notes.trim(),
+          );
+          await _versionRepo.update(updatedVersion);
+        }
       } else {
+        // Create new record
+        final recordId = _uuid.v4();
         final newRecord = RecordModel(
-          id: _uuid.v4(),
+          id: recordId,
           title: _title.trim(),
           category: _category,
-          notes: _notes.trim().isEmpty ? null : _notes.trim(),
-          expiryAt: _expiryAt,
           createdAt: now,
           updatedAt: now,
         );
-        await _repository.insert(newRecord);
+        await _recordRepo.insert(newRecord);
+
+        // Auto-create version 1
+        final version = DocumentVersion(
+          id: _uuid.v4(),
+          recordId: recordId,
+          versionNumber: 1,
+          issueDate: _issueDate ?? now,
+          expiryDate: _expiryAt,
+          notes: _notes.trim().isEmpty ? null : _notes.trim(),
+          status: 'active',
+          createdAt: now,
+        );
+        await _versionRepo.insert(version);
       }
 
       return true;

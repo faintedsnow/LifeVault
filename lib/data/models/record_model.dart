@@ -1,29 +1,31 @@
-import 'package:lifevault/core/enums/expiry_status.dart';
-import 'package:lifevault/core/helpers/expiry_helper.dart';
+import 'package:lifevault/data/models/document_version.dart';
 
-/// Data model representing a single record in the local SQLite database.
+/// Data model representing a document identity in the local SQLite database.
 ///
-/// All DateTime fields are stored as millisecondsSinceEpoch (INTEGER)
-/// in the database for reliable sorting, comparison, and timezone safety.
+/// In the versioned architecture (v2), expiry and notes live on
+/// [DocumentVersion], not on the record itself. The optional
+/// [activeVersion] field is populated by the repository via JOIN
+/// for UI convenience — it is NOT persisted.
 class RecordModel {
   final String id;
   final String title;
   final String category;
-  final String? notes;
-  final DateTime? expiryAt;
   final DateTime createdAt;
   final DateTime updatedAt;
   final bool archived;
+
+  /// The currently active version, loaded by the repository.
+  /// Not stored in the `records` table.
+  final DocumentVersion? activeVersion;
 
   const RecordModel({
     required this.id,
     required this.title,
     required this.category,
-    this.notes,
-    this.expiryAt,
     required this.createdAt,
     required this.updatedAt,
     this.archived = false,
+    this.activeVersion,
   });
 
   // ---------------------------------------------------------------------------
@@ -34,14 +36,12 @@ class RecordModel {
   ///
   /// - DateTime → int (millisecondsSinceEpoch)
   /// - bool    → int (0 / 1)
-  /// - Nullable expiryAt is stored as null when absent.
+  /// - [activeVersion] is NOT included (it's a transient UI field).
   Map<String, dynamic> toMap() {
     return {
       'id': id,
       'title': title,
       'category': category,
-      'notes': notes,
-      'expiry_at': expiryAt?.millisecondsSinceEpoch,
       'created_at': createdAt.millisecondsSinceEpoch,
       'updated_at': updatedAt.millisecondsSinceEpoch,
       'archived': archived ? 1 : 0,
@@ -50,21 +50,39 @@ class RecordModel {
 
   /// Reconstructs a [RecordModel] from a database row.
   ///
-  /// - int → DateTime (fromMillisecondsSinceEpoch)
-  /// - int → bool (1 == true)
-  /// - A null `expiry_at` value is safely handled.
+  /// If the row contains version columns (from a JOIN), the
+  /// [activeVersion] is populated automatically.
   factory RecordModel.fromMap(Map<String, dynamic> map) {
+    // Try to build activeVersion from JOIN columns prefixed with 'v_'.
+    DocumentVersion? version;
+    if (map['v_id'] != null) {
+      version = DocumentVersion(
+        id: map['v_id'] as String,
+        recordId: map['id'] as String,
+        versionNumber: map['v_version_number'] as int,
+        issueDate: map['v_issue_date'] != null
+            ? DateTime.fromMillisecondsSinceEpoch(map['v_issue_date'] as int)
+            : null,
+        expiryDate: map['v_expiry_date'] != null
+            ? DateTime.fromMillisecondsSinceEpoch(map['v_expiry_date'] as int)
+            : null,
+        notes: map['v_notes'] as String?,
+        metadataJson: map['v_metadata_json'] as String?,
+        status: map['v_status'] as String,
+        createdAt: DateTime.fromMillisecondsSinceEpoch(
+          map['v_created_at'] as int,
+        ),
+      );
+    }
+
     return RecordModel(
       id: map['id'] as String,
       title: map['title'] as String,
       category: map['category'] as String,
-      notes: map['notes'] as String?,
-      expiryAt: map['expiry_at'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(map['expiry_at'] as int)
-          : null,
       createdAt: DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int),
       updatedAt: DateTime.fromMillisecondsSinceEpoch(map['updated_at'] as int),
       archived: (map['archived'] as int) == 1,
+      activeVersion: version,
     );
   }
 
@@ -73,41 +91,29 @@ class RecordModel {
   // ---------------------------------------------------------------------------
 
   /// Creates a copy of this model with selectively overridden fields.
-  /// Useful for immutable state updates in the ViewModel layer.
   RecordModel copyWith({
     String? id,
     String? title,
     String? category,
-    String? notes,
-    DateTime? expiryAt,
     DateTime? createdAt,
     DateTime? updatedAt,
     bool? archived,
+    DocumentVersion? activeVersion,
   }) {
     return RecordModel(
       id: id ?? this.id,
       title: title ?? this.title,
       category: category ?? this.category,
-      notes: notes ?? this.notes,
-      expiryAt: expiryAt ?? this.expiryAt,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       archived: archived ?? this.archived,
+      activeVersion: activeVersion ?? this.activeVersion,
     );
   }
-
-  /// Classifies this record's expiry state using [resolveExpiryStatus].
-  ///
-  /// Returns one of: [ExpiryStatus.expired], [ExpiryStatus.expiringSoon],
-  /// [ExpiryStatus.valid], or [ExpiryStatus.noExpiry].
-  ExpiryStatus get expiryStatus => resolveExpiryStatus(expiryAt);
-
-  /// Convenience shorthand — true when status is [ExpiryStatus.expired].
-  bool get isExpired => expiryStatus == ExpiryStatus.expired;
 
   @override
   String toString() {
     return 'RecordModel(id: $id, title: $title, category: $category, '
-        'expiryAt: $expiryAt, archived: $archived)';
+        'archived: $archived, activeVersion: $activeVersion)';
   }
 }
